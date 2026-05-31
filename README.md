@@ -1,12 +1,13 @@
-# Data Pipeline: SQLite → Logstash → RabbitMQ → Python Consumer → Email
+# Data Pipeline: MySQL → Logstash → RabbitMQ → Python Consumer → Email
 
 A fully Dockerized event-driven data pipeline built with Logstash, RabbitMQ, FastAPI, and Gmail SMTP.
+Now uses an **external MySQL database** (`test_logstash`) instead of SQLite.
 
 ## Architecture
 
 ```
-SQLite DB (50 seeded orders)
-    │  (JDBC input, polls every 30s)
+MySQL DB (host: 127.0.0.1:3306 / test_logstash.orders)
+    │  (JDBC input, polls every 30s via MySQL Connector/J)
     ▼
 Logstash
     │  (logstash-output-rabbitmq)
@@ -27,9 +28,33 @@ Python Consumer (background thread)
 | Service | Port | Description |
 |---|---|---|
 | `rabbitmq` | 5672 / 15672 | AMQP broker + Management UI |
-| `logstash` | — | SQLite → RabbitMQ pipeline |
+| `logstash` | — | MySQL → RabbitMQ pipeline |
 | `consumer` | 8000 | FastAPI app + RabbitMQ consumer |
-| `db_seeder` | — | One-shot SQLite seeder |
+| MySQL | 3306 | **Host machine** — `test_logstash` DB |
+
+## Prerequisites
+
+MySQL must be running on the host with the `test_logstash` database and `orders` table:
+
+```sql
+-- Connect
+mysql -h 127.0.0.1 -P 3306 -u root -p'password' --ssl-mode=DISABLED test_logstash
+
+-- Table (already created if you followed setup)
+CREATE TABLE IF NOT EXISTS orders (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  customer_name  VARCHAR(255) NOT NULL,
+  customer_email VARCHAR(255) NOT NULL,
+  product        VARCHAR(255) NOT NULL,
+  amount         DECIMAL(10,2) NOT NULL,
+  status         VARCHAR(50) NOT NULL,
+  created_at     DATETIME NOT NULL
+);
+
+-- Insert a test row
+INSERT INTO orders (customer_name, customer_email, product, amount, status, created_at)
+VALUES ('Alice Smith', 'alice.smith@example.com', 'Laptop Pro 15', 1299.99, 'shipped', NOW());
+```
 
 ## Quick Start
 
@@ -44,7 +69,7 @@ docker compose up --build
 docker compose logs -f
 ```
 
-> **First run takes ~3–5 minutes** — Logstash image is large and the plugin/driver are downloaded during build.
+> **First run takes ~3–5 minutes** — Logstash image is large and the MySQL JDBC driver is downloaded during build.
 
 ## Endpoints
 
@@ -58,6 +83,14 @@ docker compose logs -f
 | `http://localhost:15672` | RabbitMQ Management UI (guest/guest) |
 
 ## Testing Manually
+
+### Insert a new order (Logstash picks it up within 30s)
+```bash
+mysql -h 127.0.0.1 -P 3306 -u root -p'password' --ssl-mode=DISABLED test_logstash -e "
+  INSERT INTO orders (customer_name, customer_email, product, amount, status, created_at)
+  VALUES ('Bob Johnson', 'bob.johnson@example.com', 'Mechanical Keyboard', 89.99, 'pending', NOW());
+"
+```
 
 ### Trigger a test email
 ```bash
@@ -94,14 +127,10 @@ docker-logstash-rabitmq-project/
 ├── .env                     ← Credentials (DO NOT COMMIT)
 ├── .gitignore
 │
-├── db/
-│   ├── Dockerfile
-│   └── seed.py              ← Seeds 50 orders into SQLite
-│
 ├── logstash/
-│   ├── Dockerfile           ← Installs RabbitMQ plugin + SQLite JDBC
+│   ├── Dockerfile           ← Downloads MySQL Connector/J JDBC driver
 │   ├── config/logstash.yml
-│   └── pipeline/logstash.conf
+│   └── pipeline/logstash.conf  ← MySQL JDBC → RabbitMQ
 │
 └── consumer/
     ├── Dockerfile
@@ -118,6 +147,11 @@ docker-logstash-rabitmq-project/
 | `RABBITMQ_USER` | RabbitMQ username |
 | `RABBITMQ_PASS` | RabbitMQ password |
 | `RABBITMQ_PORT` | AMQP port (default: 5672) |
+| `MYSQL_HOST` | MySQL host (`host-gateway` for Docker→host) |
+| `MYSQL_PORT` | MySQL port (default: 3306) |
+| `MYSQL_USER` | MySQL username |
+| `MYSQL_PASS` | MySQL password |
+| `MYSQL_DB` | MySQL database name |
 | `SMTP_FROM` | Gmail sender address |
 | `SMTP_TO` | Email recipient |
 | `SMTP_APP_PASS` | Gmail App Password |
@@ -136,12 +170,13 @@ docker compose logs -f logstash
 docker compose logs -f consumer
 
 # Rebuild a single service
-docker compose up --build consumer
+docker compose up --build logstash
 ```
 
 ## Notes
 
-- Logstash polls SQLite every **30 seconds** — after the first poll, all 50 orders are processed
+- Logstash polls MySQL every **30 seconds** using `WHERE id > :sql_last_value` for incremental reads
 - Each consumed message triggers **one email** to `som.python@gmail.com`
 - The consumer retries RabbitMQ connection automatically on failure
 - RabbitMQ messages are **durable** and survive broker restarts
+- MySQL runs on the **host machine** — Docker containers reach it via `host-gateway`

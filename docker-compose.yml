@@ -24,46 +24,53 @@ services:
     networks:
       - pipeline_net
 
-  # ─────────────────────────────────────────────
-  # 2. DB Seeder  (one-shot: seeds SQLite then exits)
-  # ─────────────────────────────────────────────
-  db_seeder:
-    build:
-      context: ./db
-      dockerfile: Dockerfile
-    container_name: db_seeder
-    volumes:
-      - db_data:/data
-    networks:
-      - pipeline_net
-    restart: "no"
+
+
+  # # ─────────────────────────────────────────────
+  # #  DB Seeder  (one-shot: seeds SQLite then exits)
+  # # ─────────────────────────────────────────────
+  # db_seeder:
+  #   build:
+  #     context: ./db
+  #     dockerfile: Dockerfile
+  #   container_name: db_seeder
+  #   volumes:
+  #     - db_data:/data
+  #   networks:
+  #     - pipeline_net
+  #   restart: "no"
+
+
 
   # ─────────────────────────────────────────────
-  # 3. Logstash  (SQLite → RabbitMQ)
+  # 2. Logstash  (MySQL → RabbitMQ)
   # ─────────────────────────────────────────────
   logstash:
     build:
       context: ./logstash
       dockerfile: Dockerfile
     container_name: logstash
-    volumes:
-      - db_data:/data:ro          # read-only access to SQLite DB
+    extra_hosts:
+      - "host-gateway:host-gateway"   # resolve host-gateway → host machine IP
     environment:
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: ${RABBITMQ_PORT}
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASS: ${RABBITMQ_PASS}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASS: ${MYSQL_PASS}
+      MYSQL_DB:   ${MYSQL_DB}
       LS_JAVA_OPTS: "-Xms512m -Xmx512m"
     depends_on:
       rabbitmq:
         condition: service_healthy
-      db_seeder:
-        condition: service_completed_successfully
     networks:
       - pipeline_net
 
   # ─────────────────────────────────────────────
-  # 4. Python Consumer + FastAPI
+  # 3. Python Consumer + FastAPI
   # ─────────────────────────────────────────────
   consumer:
     build:
@@ -91,8 +98,8 @@ services:
 # Volumes & Networks
 # ─────────────────────────────────────────────
 volumes:
-  db_data:
-    driver: local
+  # db_data:
+  #   driver: local
   rabbitmq_data:
     driver: local
 

@@ -5,12 +5,22 @@ USER root
 # NOTE: logstash-output-rabbitmq is already bundled in logstash-integration-rabbitmq
 # (included with Logstash 8.x) — no install needed.
 
-# ── Download SQLite JDBC driver from Maven Central ──────────
+
+# # ── Download SQLite JDBC driver from Maven Central ──────────
+# RUN mkdir -p /usr/share/logstash/drivers && \
+#     curl -fsSL \
+#       "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.45.1.0/sqlite-jdbc-3.45.1.0.jar" \
+#       -o /usr/share/logstash/drivers/sqlite-jdbc.jar && \
+#     echo "SQLite JDBC driver downloaded ✓"
+
+
+
+# ── Download MySQL Connector/J JDBC driver ──────────────────
 RUN mkdir -p /usr/share/logstash/drivers && \
     curl -fsSL \
-      "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.45.1.0/sqlite-jdbc-3.45.1.0.jar" \
-      -o /usr/share/logstash/drivers/sqlite-jdbc.jar && \
-    echo "SQLite JDBC driver downloaded ✓"
+      "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.3.0/mysql-connector-j-8.3.0.jar" \
+      -o /usr/share/logstash/drivers/mysql-connector-j.jar && \
+    echo "MySQL JDBC driver downloaded ✓"
 
 # ── Ensure data dir exists for JDBC state tracking ──────────
 RUN mkdir -p /usr/share/logstash/data && \
