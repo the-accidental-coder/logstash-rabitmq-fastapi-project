@@ -1,0 +1,101 @@
+services:
+
+  # ─────────────────────────────────────────────
+  # 1. RabbitMQ Message Broker
+  # ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"       # AMQP
+      - "15672:15672"     # Management UI  →  http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      - pipeline_net
+
+  # ─────────────────────────────────────────────
+  # 2. DB Seeder  (one-shot: seeds SQLite then exits)
+  # ─────────────────────────────────────────────
+  db_seeder:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: db_seeder
+    volumes:
+      - db_data:/data
+    networks:
+      - pipeline_net
+    restart: "no"
+
+  # ─────────────────────────────────────────────
+  # 3. Logstash  (SQLite → RabbitMQ)
+  # ─────────────────────────────────────────────
+  logstash:
+    build:
+      context: ./logstash
+      dockerfile: Dockerfile
+    container_name: logstash
+    volumes:
+      - db_data:/data:ro          # read-only access to SQLite DB
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
+      LS_JAVA_OPTS: "-Xms512m -Xmx512m"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db_seeder:
+        condition: service_completed_successfully
+    networks:
+      - pipeline_net
+
+  # ─────────────────────────────────────────────
+  # 4. Python Consumer + FastAPI
+  # ─────────────────────────────────────────────
+  consumer:
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    container_name: consumer
+    ports:
+      - "8000:8000"     # FastAPI  →  http://localhost:8000
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: ${RABBITMQ_PORT}
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_TO: ${SMTP_TO}
+      SMTP_APP_PASS: ${SMTP_APP_PASS}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - pipeline_net
+    restart: unless-stopped
+
+# ─────────────────────────────────────────────
+# Volumes & Networks
+# ─────────────────────────────────────────────
+volumes:
+  db_data:
+    driver: local
+  rabbitmq_data:
+    driver: local
+
+networks:
+  pipeline_net:
+    driver: bridge

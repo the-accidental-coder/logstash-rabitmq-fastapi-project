@@ -1,0 +1,16 @@
+# ─── Logstash: global settings ───────────────────────────────────────────────
+http.host: "0.0.0.0"
+log.level: info
+
+# Disable X-Pack monitoring (requires a license)
+xpack.monitoring.enabled: false
+
+# Pipeline configuration
+path.config: /usr/share/logstash/pipeline
+pipeline.id: main
+pipeline.workers: 1
+pipeline.batch.size: 10
+pipeline.batch.delay: 50
+
+# Path for persisted JDBC tracking state
+path.data: /usr/share/logstash/data
